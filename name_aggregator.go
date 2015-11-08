@@ -57,12 +57,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to declare an exchange. ERR: %+v", err)
 	}
-
+	nameq, _ := Config.String(ENV, "nameq")
 	q, err := ch.QueueDeclare(
-		"",    // name
-		false, // durable
+		nameq, // name
+		true,  // durable
 		false, // delete when usused
-		true,  // exclusive
+		false, // exclusive
 		false, // no-wait
 		nil,   // arguments
 	)

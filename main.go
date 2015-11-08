@@ -76,10 +76,10 @@ func metricHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-
+	routeKey, _ := Config.String(ENV, "name_routk")
 	err = ch.Publish(
 		exchange, // exchange
-		"",       // routing key
+		routeKey, // routing key
 		false,    // mandatory
 		false,    // immediate
 		amqp.Publishing{
