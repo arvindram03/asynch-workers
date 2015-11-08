@@ -29,17 +29,6 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Hello Gopher :)")
 }
 
-func getQueue(ch *amqp.Channel, queue string) (amqp.Queue, error) {
-	return ch.QueueDeclare(
-		queue, // name
-		false, // durable
-		false, // delete when unused
-		false, // exclusive
-		false, // no-wait
-		nil,   // arguments
-	)
-}
-
 func metricHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != POST {
 		w.WriteHeader(http.StatusNotFound)
@@ -57,11 +46,21 @@ func metricHandler(w http.ResponseWriter, r *http.Request) {
 		log.Fatalf("Failed to open channel. ERR: %+v", err)
 	}
 	defer ch.Close()
-
-	queue, _ := Config.String(ENV, "metrics")
-	q, err := getQueue(ch, queue)
+	ch.Confirm(false)
+	ack, nack := ch.NotifyConfirm(make(chan uint64, 1),
+		make(chan uint64, 1))
+	exchange, _ := Config.String(ENV, "exchange")
+	err = ch.ExchangeDeclare(
+		exchange, // name
+		"fanout", // type
+		true,     // durable
+		false,    // auto-deleted
+		false,    // internal
+		false,    // no-wait
+		nil,      // arguments
+	)
 	if err != nil {
-		log.Fatalf("Failed to open channel. ERR: %+v", err)
+		log.Fatalf("Failed to declare an exchange. ERR: %+v", err)
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -79,20 +78,27 @@ func metricHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err = ch.Publish(
-		"",     // exchange
-		q.Name, // routing key
-		false,  // mandatory
-		false,  // immediate
+		exchange, // exchange
+		"",       // routing key
+		false,    // mandatory
+		false,    // immediate
 		amqp.Publishing{
 			ContentType: "application/json",
 			Body:        []byte(metricJson),
 		})
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		return
+		log.Fatalf("Failed to publish message. ERR: %+v", err)
 	}
 
-	log.Printf("Pushed to %+v\n", metric)
+	select {
+	case <-ack:
+		log.Printf("Pushed. Metric: %+v\n", metric)
+		w.WriteHeader(http.StatusOK)
+	case <-nack:
+		log.Printf("Failed tp push. Metric: %+v\n", metric)
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+
 }
 
 func loadConfig() (err error) {
