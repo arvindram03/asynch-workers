@@ -4,15 +4,10 @@ import (
 	"encoding/json"
 	"log"
 
+	"github.com/arvindram03/asynch-workers/data"
+	"github.com/arvindram03/asynch-workers/rabbitmq"
 	"github.com/robfig/config"
-	"github.com/streadway/amqp"
 )
-
-type Metric struct {
-	Username string `json:"username"`
-	Count    int64  `json:"count"`
-	Metric   string `json:"metric"`
-}
 
 var (
 	Config *config.Config
@@ -33,62 +28,35 @@ func main() {
 	loadConfig()
 
 	rabbitmqUrl, _ := Config.String(ENV, "rabbitmq-url")
-	conn, err := amqp.Dial(rabbitmqUrl)
+	conn, err := rabbitmq.Dial(rabbitmqUrl)
 	if err != nil {
 		log.Fatalf("Failed to get connection. ERR: %+v", err)
 	}
 	defer conn.Close()
 
-	ch, err := conn.Channel()
+	ch, err := rabbitmq.Channel(conn)
 	if err != nil {
 		log.Fatalf("Failed to open channel. ERR: %+v", err)
 	}
 	defer ch.Close()
 	exchange, _ := Config.String(ENV, "exchange")
-	err = ch.ExchangeDeclare(
-		exchange, // name
-		"fanout", // type
-		true,     // durable
-		false,    // auto-deleted
-		false,    // internal
-		false,    // no-wait
-		nil,      // arguments
-	)
+	err = rabbitmq.Exchange(exchange, ch)
 	if err != nil {
 		log.Fatalf("Failed to declare an exchange. ERR: %+v", err)
 	}
+
 	nameq, _ := Config.String(ENV, "nameq")
-	q, err := ch.QueueDeclare(
-		nameq, // name
-		true,  // durable
-		false, // delete when usused
-		false, // exclusive
-		false, // no-wait
-		nil,   // arguments
-	)
+	q, err := rabbitmq.Queue(nameq, ch)
 	if err != nil {
 		log.Fatalf("Failed to declare a queue. ERR: %+v", err)
 	}
 
-	err = ch.QueueBind(
-		q.Name,   // queue name
-		"",       // routing key
-		exchange, // exchange
-		false,
-		nil)
+	err = rabbitmq.QueueBind(q, exchange, ch)
 	if err != nil {
 		log.Fatalf("Failed to bind. ERR: %+v", err)
 	}
 
-	msgs, err := ch.Consume(
-		q.Name, // queue
-		"",     // consumer
-		false,  // auto-ack
-		false,  // exclusive
-		false,  // no-local
-		false,  // no-wait
-		nil,    // args
-	)
+	msgs, err := rabbitmq.Consume(q, ch)
 	if err != nil {
 		log.Fatalf("Failed to register name collector. ERR: %+v", err)
 	}
@@ -97,7 +65,7 @@ func main() {
 
 	go func() {
 		for d := range msgs {
-			var metric Metric
+			var metric data.Metric
 			err := json.Unmarshal(d.Body, &metric)
 			if err != nil {
 				log.Fatalf("Error unmarshalling metric. ERR: %+v", err)

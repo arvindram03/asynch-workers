@@ -6,8 +6,9 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/arvindram03/asynch-workers/data"
+	"github.com/arvindram03/asynch-workers/rabbitmq"
 	"github.com/robfig/config"
-	"github.com/streadway/amqp"
 )
 
 const (
@@ -19,14 +20,8 @@ var (
 	ENV    string
 )
 
-type Metric struct {
-	Username string `json:"username"`
-	Count    int64  `json:"count"`
-	Metric   string `json:"metric"`
-}
-
 func handler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "Hello Gopher :)")
+	fmt.Fprintf(w, "Hello Gophers :)")
 }
 
 func metricHandler(w http.ResponseWriter, r *http.Request) {
@@ -35,36 +30,28 @@ func metricHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rabbitmqUrl, _ := Config.String(ENV, "rabbitmq-url")
-	conn, err := amqp.Dial(rabbitmqUrl)
+	conn, err := rabbitmq.Dial(rabbitmqUrl)
 	if err != nil {
 		log.Fatalf("Failed to get connection. ERR: %+v", err)
 	}
 	defer conn.Close()
 
-	ch, err := conn.Channel()
+	ch, err := rabbitmq.Channel(conn)
 	if err != nil {
 		log.Fatalf("Failed to open channel. ERR: %+v", err)
 	}
 	defer ch.Close()
 	ch.Confirm(false)
-	ack, nack := ch.NotifyConfirm(make(chan uint64, 1),
-		make(chan uint64, 1))
+
+	ack, nack := rabbitmq.GetAckNack(ch)
 	exchange, _ := Config.String(ENV, "exchange")
-	err = ch.ExchangeDeclare(
-		exchange, // name
-		"fanout", // type
-		true,     // durable
-		false,    // auto-deleted
-		false,    // internal
-		false,    // no-wait
-		nil,      // arguments
-	)
+	err = rabbitmq.Exchange(exchange, ch)
 	if err != nil {
 		log.Fatalf("Failed to declare an exchange. ERR: %+v", err)
 	}
 
 	decoder := json.NewDecoder(r.Body)
-	var metric Metric
+	var metric data.Metric
 	err = decoder.Decode(&metric)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -76,15 +63,7 @@ func metricHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	err = ch.Publish(
-		exchange, // exchange
-		"",       // routing key
-		false,    // mandatory
-		false,    // immediate
-		amqp.Publishing{
-			ContentType: "application/json",
-			Body:        []byte(metricJson),
-		})
+	err = rabbitmq.PublishJson(metricJson, exchange, ch)
 	if err != nil {
 		log.Fatalf("Failed to publish message. ERR: %+v", err)
 	}
@@ -100,13 +79,16 @@ func metricHandler(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func loadConfig() (err error) {
-	Config, err = config.ReadDefault("app.conf")
-	return err
-}
-
 func setENV() {
 	ENV = "DEV"
+}
+
+func loadConfig() {
+	var err error
+	Config, err = config.ReadDefault("app.conf")
+	if err != nil {
+		log.Fatalf("Error loading config. ERR: %+v", err)
+	}
 }
 
 func main() {
