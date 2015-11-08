@@ -82,7 +82,7 @@ func main() {
 	msgs, err := ch.Consume(
 		q.Name, // queue
 		"",     // consumer
-		true,   // auto-ack
+		false,  // auto-ack
 		false,  // exclusive
 		false,  // no-local
 		false,  // no-wait
@@ -101,6 +101,7 @@ func main() {
 			if err != nil {
 				log.Fatalf("Error unmarshalling metric. ERR: %+v", err)
 			}
+			d.Ack(false)
 			log.Printf("Metric %+v", metric)
 		}
 	}()
