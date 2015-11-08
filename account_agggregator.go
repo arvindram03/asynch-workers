@@ -45,8 +45,8 @@ func main() {
 		log.Fatalf("Failed to declare an exchange. ERR: %+v", err)
 	}
 
-	nameq, _ := Config.String(ENV, "accq")
-	q, err := rabbitmq.Queue(nameq, ch)
+	accq, _ := Config.String(ENV, "accq")
+	q, err := rabbitmq.Queue(accq, ch)
 	if err != nil {
 		log.Fatalf("Failed to declare a queue. ERR: %+v", err)
 	}
