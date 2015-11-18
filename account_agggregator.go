@@ -1,17 +1,38 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"log"
+	"time"
 
 	"github.com/arvindram03/asynch-workers/data"
 	"github.com/arvindram03/asynch-workers/rabbitmq"
+	"github.com/go-gorp/gorp"
+	"github.com/lib/pq"
 	"github.com/robfig/config"
 )
+
+/*
+CREATE TABLE accounts (
+	id serial primary key,
+	name text unique,
+	time timestamp without time zone
+);
+*/
+type Account struct {
+	Id   int64     `db:"id"`
+	Name string    `db:"name"`
+	Time time.Time `db:"time"`
+}
 
 var (
 	Config *config.Config
 	ENV    string
+)
+
+const (
+	PG_UNIQUE_VIOLATION_ERR = "unique_violation"
 )
 
 func loadConfig() (err error) {
@@ -23,9 +44,38 @@ func setENV() {
 	ENV = "DEV"
 }
 
+func initDb() *gorp.DbMap {
+	postgresUrl, _ := Config.String(ENV, "postgres-url")
+	db, err := sql.Open("postgres", postgresUrl)
+	if err != nil {
+		log.Fatalf("Failed to get postgres connection. ERR: %+v", err)
+	}
+
+	dbMap := &gorp.DbMap{Db: db, Dialect: gorp.PostgresDialect{}}
+	dbMap.AddTableWithName(Account{}, "accounts").SetKeys(true, "Id")
+
+	return dbMap
+}
+
+func process(metric data.Metric, dbMap *gorp.DbMap) error {
+	log.Printf("Metric %+v", metric)
+	now := time.Now().UTC()
+	account := Account{Name: metric.Username, Time: now}
+
+	err := dbMap.Insert(&account)
+	if err, ok := err.(*pq.Error); ok &&
+		err.Code.Name() != PG_UNIQUE_VIOLATION_ERR {
+		log.Fatalf("Error inserting account. ERR: %+v", err)
+	}
+
+	return nil
+}
+
 func main() {
 	setENV()
 	loadConfig()
+	dbMap := initDb()
+	defer dbMap.Db.Close()
 
 	rabbitmqUrl, _ := Config.String(ENV, "rabbitmq-url")
 	conn, err := rabbitmq.Dial(rabbitmqUrl)
@@ -70,8 +120,12 @@ func main() {
 			if err != nil {
 				log.Fatalf("Error unmarshalling metric. ERR: %+v", err)
 			}
+
+			err = process(metric, dbMap)
+			if err != nil {
+				d.Nack(true, true)
+			}
 			d.Ack(false)
-			log.Printf("Metric %+v", metric)
 		}
 	}()
 
