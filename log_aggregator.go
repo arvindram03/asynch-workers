@@ -19,8 +19,9 @@ var (
 )
 
 type Log struct {
-	ID      string `bson:"_id"`
-	Metrics []data.Metric
+	ID      bson.ObjectId `bson:"_id,omitempty"`
+	Hour    string
+	Metrics data.Metric
 }
 
 func loadConfig() (err error) {
@@ -37,21 +38,19 @@ func initMongoDB() (*mgo.Session, error) {
 	return mgo.Dial(mongoURL)
 
 }
-func getID(t time.Time) string {
+func getHour(t time.Time) string {
 	time := time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, time.UTC)
 	return time.String()
 }
 func processLog(metric data.Metric, session *mgo.Session) error {
-	now := time.Now().UTC()
-	id := getID(now)
-	hourlyLog := &Log{}
-	c := session.DB("koding").C("logs")
-	err := c.Find(bson.M{"_id": id}).One(&hourlyLog)
-	if err != nil {
-		log.Fatalf("Failed to fetch hourly logs. ERR: %+v", err)
-	}
-	hourlyLog.Metrics = append(hourlyLog.Metrics, metric)
-	err = c.Update(bson.M{"_id": id}, hourlyLog)
+	hour := getHour(time.Now().UTC())
+	metricLog := &Log{Hour: hour, Metrics: metric}
+
+	mongoDBName, _ := Config.String(ENV, "mongo-db-name")
+	mongoCollectionName, _ := Config.String(ENV, "mongo-collection-name")
+	c := session.DB(mongoDBName).C(mongoCollectionName)
+
+	err := c.Insert(metricLog)
 	if err != nil {
 		log.Fatalf("Failed to insert log. ERR: %+v", err)
 	}
