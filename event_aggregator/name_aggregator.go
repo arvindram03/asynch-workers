@@ -2,8 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/arvindram03/asynch-workers/data"
@@ -34,6 +36,59 @@ func initRedisClient() *redis.Client {
 	})
 }
 
+func getEvents(keys []string) (events []string) {
+	for _, key := range keys {
+		parts := strings.Split(key, " ")
+		if len(keys) != 2 {
+			continue
+		}
+		event := parts[1]
+		events = append(events, event)
+	}
+	return
+}
+
+func aggregate(client *redis.Client, year int, month int) error {
+	log.Println("Curating logs...")
+	key := strconv.Itoa(year) + "-" + strconv.Itoa(month) + "-*"
+	log.Println("KEY ", key)
+	keys, err := client.Keys(key).Result()
+	if err != nil {
+		log.Fatalf("Failed to set metric connection. ERR: %+v", err)
+	}
+	log.Printf("Keys %+v", keys)
+	events := getEvents(keys)
+
+	log.Printf("Events %+v", events)
+	return err
+}
+
+func curateLogs(client *redis.Client) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Println("Recovered in f", r)
+			go curateLogs(client)
+		}
+	}()
+
+	c := time.Tick(30 * 24 * time.Hour)
+	for _ = range c {
+		year, month, _ := time.Now().UTC().Date()
+		retryCount, _ := Config.Int(ENV, "retry-count")
+		backoff_time := 2 * time.Second
+		for i := 0; i < retryCount; i++ {
+			err := aggregate(client, year, int(month))
+			if err == nil {
+				break
+			}
+			log.Println("Failed to aggregate logs for the mo. ERR: %+v", err)
+			backoff_time = backoff_time * 2
+			log.Println("Backing off for", backoff_time)
+			<-time.After(backoff_time)
+		}
+	}
+}
+
 func process(metric data.Metric, client *redis.Client) error {
 	year, month, day := time.Now().UTC().Date()
 	date := strconv.Itoa(year) + "-" + strconv.Itoa(int(month)) + "-" + strconv.Itoa(day)
@@ -50,8 +105,7 @@ func process(metric data.Metric, client *redis.Client) error {
 func main() {
 	setENV()
 	loadConfig()
-	initRedisClient()
-	client := initRedisClient()
+
 	rabbitmqUrl, _ := Config.String(ENV, "rabbitmq-url")
 	conn, err := rabbitmq.Dial(rabbitmqUrl)
 	if err != nil {
@@ -88,6 +142,8 @@ func main() {
 
 	forever := make(chan bool)
 
+	client := initRedisClient()
+
 	go func() {
 		for d := range msgs {
 			var metric data.Metric
@@ -102,6 +158,13 @@ func main() {
 			d.Ack(false)
 		}
 	}()
+
+	// // if curator panics, recovers and invoked the curator again after sleeping
+	// // for 10 seconds
+	// go func() {
+
+	// }()
+	go curateLogs(client)
 
 	log.Printf("Waiting for metrics....")
 	<-forever
