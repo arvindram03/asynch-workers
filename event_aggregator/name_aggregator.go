@@ -39,7 +39,7 @@ func initRedisClient() *redis.Client {
 func getEvents(keys []string) (events []string) {
 	for _, key := range keys {
 		parts := strings.Split(key, " ")
-		if len(keys) != 2 {
+		if len(parts) != 2 {
 			continue
 		}
 		event := parts[1]
@@ -50,16 +50,42 @@ func getEvents(keys []string) (events []string) {
 
 func aggregate(client *redis.Client, year int, month int) error {
 	log.Println("Curating logs...")
-	key := strconv.Itoa(year) + "-" + strconv.Itoa(month) + "-*"
-	log.Println("KEY ", key)
+	yearMonth := strconv.Itoa(year) + "-" + strconv.Itoa(month)
+	key := yearMonth + "-*"
 	keys, err := client.Keys(key).Result()
 	if err != nil {
-		log.Fatalf("Failed to set metric connection. ERR: %+v", err)
+		log.Println("Failed to set metric connection. ERR: %+v", err)
+		return err
 	}
-	log.Printf("Keys %+v", keys)
-	events := getEvents(keys)
 
-	log.Printf("Events %+v", events)
+	if len(keys) == 0 {
+		return nil
+	}
+
+	events := getEvents(keys)
+	monthlyEvent := struct {
+		Events []string
+	}{
+		events,
+	}
+
+	byteContent, err := json.Marshal(monthlyEvent)
+	if err != nil {
+		log.Println("Failed to set all event under single key. ERR: %+v", err)
+		return err
+	}
+
+	err = client.Set(yearMonth, byteContent, 0).Err()
+	if err != nil {
+		log.Println("Failed to set all event under single key. ERR: %+v", err)
+		return err
+	}
+
+	err = client.Del(keys...).Err()
+	if err != nil {
+		log.Println("Failed to delete all event in the past month. ERR: %+v", err)
+		return err
+	}
 	return err
 }
 
@@ -72,6 +98,7 @@ func curateLogs(client *redis.Client) {
 	}()
 
 	c := time.Tick(30 * 24 * time.Hour)
+	// c := time.Tick(1 * time.Second)
 	for _ = range c {
 		year, month, _ := time.Now().UTC().Date()
 		retryCount, _ := Config.Int(ENV, "retry-count")
@@ -81,7 +108,7 @@ func curateLogs(client *redis.Client) {
 			if err == nil {
 				break
 			}
-			log.Println("Failed to aggregate logs for the mo. ERR: %+v", err)
+			log.Println("Failed to aggregate logs for the month. ERR: %+v", err)
 			backoff_time = backoff_time * 2
 			log.Println("Backing off for", backoff_time)
 			<-time.After(backoff_time)
