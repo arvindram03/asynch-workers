@@ -1,0 +1,27 @@
+{
+	"ImportPath": "github.com/arvindram03/asynch-workers/log_aggregator",
+	"GoVersion": "go1.4.2",
+	"Deps": [
+		{
+			"ImportPath": "github.com/arvindram03/asynch-workers/data",
+			"Rev": "343d84697f93045b8badbf2ea4f0ef72cf5fcb89"
+		},
+		{
+			"ImportPath": "github.com/arvindram03/asynch-workers/rabbitmq",
+			"Rev": "343d84697f93045b8badbf2ea4f0ef72cf5fcb89"
+		},
+		{
+			"ImportPath": "github.com/robfig/config",
+			"Rev": "0f78529c8c7e3e9a25f15876532ecbc07c7d99e6"
+		},
+		{
+			"ImportPath": "github.com/streadway/amqp",
+			"Rev": "b4f3ceab0337f013208d31348b578d83c0064744"
+		},
+		{
+			"ImportPath": "labix.org/v2/mgo",
+			"Comment": "287",
+			"Rev": "gustavo@niemeyer.net-20140501184651-975yyw9ipld92pji"
+		}
+	]
+}

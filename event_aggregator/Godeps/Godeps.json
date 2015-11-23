@@ -1,0 +1,31 @@
+{
+	"ImportPath": "github.com/arvindram03/asynch-workers/event_aggregator",
+	"GoVersion": "go1.4.2",
+	"Deps": [
+		{
+			"ImportPath": "github.com/arvindram03/asynch-workers/data",
+			"Rev": "343d84697f93045b8badbf2ea4f0ef72cf5fcb89"
+		},
+		{
+			"ImportPath": "github.com/arvindram03/asynch-workers/rabbitmq",
+			"Rev": "343d84697f93045b8badbf2ea4f0ef72cf5fcb89"
+		},
+		{
+			"ImportPath": "github.com/robfig/config",
+			"Rev": "0f78529c8c7e3e9a25f15876532ecbc07c7d99e6"
+		},
+		{
+			"ImportPath": "github.com/streadway/amqp",
+			"Rev": "b4f3ceab0337f013208d31348b578d83c0064744"
+		},
+		{
+			"ImportPath": "gopkg.in/bsm/ratelimit.v1",
+			"Rev": "bda20d5067a03094fc6762f7ead53027afac5f28"
+		},
+		{
+			"ImportPath": "gopkg.in/redis.v3",
+			"Comment": "v3.2.16",
+			"Rev": "7ea220f54db94ef0b305499d409e9887feaf536e"
+		}
+	]
+}
