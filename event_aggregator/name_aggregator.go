@@ -21,6 +21,9 @@ var (
 
 func loadConfig() (err error) {
 	Config, err = config.ReadDefault("../app.conf")
+	if err != nil {
+		log.Fatalf("Failed to read configs. ERR: %+v", err)
+	}
 	return err
 }
 
@@ -29,8 +32,9 @@ func setENV() {
 }
 
 func initRedisClient() *redis.Client {
+	redisUrl, _ := Config.String(ENV, "redis-url")
 	return redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
+		Addr:     redisUrl,
 		Password: "",
 		DB:       0,
 	})
@@ -54,7 +58,7 @@ func aggregate(client *redis.Client, year int, month int) error {
 	key := yearMonth + "-*"
 	keys, err := client.Keys(key).Result()
 	if err != nil {
-		log.Println("Failed to set metric connection. ERR: %+v", err)
+		log.Printf("Failed to set metric connection. ERR: %+v", err)
 		return err
 	}
 
