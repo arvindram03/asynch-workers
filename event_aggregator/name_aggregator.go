@@ -14,6 +14,11 @@ import (
 	redis "gopkg.in/redis.v3"
 )
 
+const (
+	DIST_LOCK = "DIST_LOCK"
+	ACQUIRED  = 1
+)
+
 var (
 	Config *config.Config
 	ENV    string
@@ -93,17 +98,59 @@ func aggregate(client *redis.Client, year int, month int) error {
 	return err
 }
 
-func curateLogs(client *redis.Client) {
+func acquireLock(client *redis.Client) bool {
+	_, err := client.Watch(DIST_LOCK)
+	if err != nil {
+		log.Fatalf("Error watching distributed lock key. ERR: %+v", err)
+		return false
+	}
+	value, err := client.Get(DIST_LOCK).Int64()
+	if err != nil {
+		log.Fatalf("Error getting distributed lock key. ERR: %+v", err)
+		return false
+	}
+	if value == ACQUIRED {
+		return false
+	}
+	multi := client.Multi()
+	_, err = multi.Exec(func() error {
+		err := multi.Set(DIST_LOCK, ACQUIRED, 0).Err()
+		if err != nil {
+			log.Fatalf("Error setting distributed lock key. ERR: %+v", err)
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		log.Fatalf("Error executing the set distributed lock key. ERR: %+v", err)
+		return false
+	}
+	return true
+}
+
+func releaseLock(client *redis.Client) {
+	err := client.Set(DIST_LOCK, 0, 0).Err()
+	if err != nil {
+		log.Fatalf("Error in releasing the lock. ERR: %+v", err)
+	}
+}
+
+func curateLogs() {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Println("Recovered in f", r)
-			go curateLogs(client)
+			go curateLogs()
 		}
 	}()
 
 	c := time.Tick(30 * 24 * time.Hour)
-	// c := time.Tick(1 * time.Second)
+	// c := time.Tick(3 * time.Second)
 	for _ = range c {
+		client := initRedisClient()
+		if !acquireLock(client) {
+			continue
+		}
+		fmt.Println("Acquired Lock")
 		year, month, _ := time.Now().UTC().Date()
 		retryCount, _ := Config.Int(ENV, "retry-count")
 		backoff_time := 2 * time.Second
@@ -117,6 +164,8 @@ func curateLogs(client *redis.Client) {
 			log.Println("Backing off for", backoff_time)
 			<-time.After(backoff_time)
 		}
+		releaseLock(client)
+		client.Close()
 	}
 }
 
@@ -173,10 +222,9 @@ func main() {
 
 	forever := make(chan bool)
 
-	client := initRedisClient()
-
 	go func() {
 		for d := range msgs {
+			client := initRedisClient()
 			var metric data.Metric
 			err := json.Unmarshal(d.Body, &metric)
 			if err != nil {
@@ -187,6 +235,7 @@ func main() {
 				d.Nack(true, true)
 			}
 			d.Ack(false)
+			client.Close()
 		}
 	}()
 
@@ -195,7 +244,7 @@ func main() {
 	// go func() {
 
 	// }()
-	go curateLogs(client)
+	go curateLogs()
 
 	log.Printf("Waiting for metrics....")
 	<-forever
