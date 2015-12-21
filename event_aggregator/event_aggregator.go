@@ -135,6 +135,34 @@ func releaseLock(client *redis.Client) {
 	}
 }
 
+func curate() {
+	client := initRedisClient()
+	if !acquireLock(client) {
+		return
+	}
+	fmt.Println("Acquired Lock")
+	year, month, _ := time.Now().UTC().Date()
+	retryCount, _ := Config.Int(ENV, "retry-count")
+	backoff_time := 2 * time.Second
+	for i := 0; i < retryCount; i++ {
+		err := aggregate(client, year, int(month))
+		if err == nil {
+			break
+		}
+		log.Println("Failed to aggregate logs for the month. ERR: %+v", err)
+		backoff_time = backoff_time * 2
+		log.Println("Backing off for", backoff_time)
+		<-time.After(backoff_time)
+	}
+	releaseLock(client)
+	client.Close()
+}
+
+func getEndOfMonth() time.Duration {
+	now := time.Now()
+	return time.Since(time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, time.UTC))
+}
+
 func curateLogs() {
 	defer func() {
 		if r := recover(); r != nil {
@@ -142,30 +170,12 @@ func curateLogs() {
 			go curateLogs()
 		}
 	}()
-
+	<-time.After(getEndOfMonth())
+	curate()
 	c := time.Tick(30 * 24 * time.Hour)
 	// c := time.Tick(3 * time.Second)
 	for _ = range c {
-		client := initRedisClient()
-		if !acquireLock(client) {
-			continue
-		}
-		fmt.Println("Acquired Lock")
-		year, month, _ := time.Now().UTC().Date()
-		retryCount, _ := Config.Int(ENV, "retry-count")
-		backoff_time := 2 * time.Second
-		for i := 0; i < retryCount; i++ {
-			err := aggregate(client, year, int(month))
-			if err == nil {
-				break
-			}
-			log.Println("Failed to aggregate logs for the month. ERR: %+v", err)
-			backoff_time = backoff_time * 2
-			log.Println("Backing off for", backoff_time)
-			<-time.After(backoff_time)
-		}
-		releaseLock(client)
-		client.Close()
+		curate()
 	}
 }
 
@@ -174,7 +184,6 @@ func process(metric data.Metric, client *redis.Client) error {
 	date := strconv.Itoa(year) + "-" + strconv.Itoa(int(month)) + "-" + strconv.Itoa(day)
 	key := date + " " + metric.Metric
 	err := client.Set(key, true, 0).Err()
-	log.Println("KEY ", key)
 	if err != nil {
 		log.Fatalf("Failed to set metric connection. ERR: %+v", err)
 	}
